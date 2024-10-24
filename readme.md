@@ -142,8 +142,8 @@ It is recommended that you use a [virtual environment](https://docs.python.org/3
 
 Your first task is to think about the protocol you will use for the VPN.
 The only key material that the client and the server have when the processes start is the following:
-- `VPN_CLIENT` has `CLIENT_PRIVATE_KEY`, `SERVER_PUBLIC_KEY`
-- `VPN_SERVER` has `SERVER_PRIVATE_KEY`, `CLIENT_PUBLIC_KEY`.
+- `VPN_CLIENT` has `CLIENT_PRIVATE_KEY`, `CLIENT_PUBLIC_KEY`
+- `VPN_SERVER` has `SERVER_PRIVATE_KEY`, `SERVER_PUBLIC_KEY`.
 
 Using this information, you must devise:
 - A key exchange protocol that the client and server run to derive a shared secret key.
