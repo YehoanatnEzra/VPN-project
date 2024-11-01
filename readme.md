@@ -49,20 +49,22 @@ A Virtual Private Network (VPN) is a technology that provides a secure and priva
 When a user connects to a VPN, their internet traffic is encrypted, preventing anyone from reading the contents of their messages. 
 This creates a private tunnel between the user's device and the VPN server.
 
-In this assignment, you will implement a VPN where the client and server have exchange public key values.
-You must design a key exchange protocol that they can use to agree on a common shared key, as well as a communication protocol that provides certain security properties.
+In this assignment, you will implement a VPN where we will assume that the first message between client and server, which will be their public key exchange, is authenticated.
+We will call these keys the *long-term public keys*.
+Starting from this, you must design a key exchange protocol that they can use to agree on a common shared key, as well as a communication protocol that provides certain security properties.
 
 ### Adversary Model
 
 In the real world, Mallory and Eve can be anyone, including your Internet Service Provider (ISP).
 For this assignment, we will instantiate Mallory as a man in the middle by establishing the connection between client and server through Mallory.
-This allows Mallory to easily see the information exchanged between client and server, delete packets, and replay packets.
+This allows Mallory to easily see the information exchanged between client and server, *delete* packets, and *replay* packets.
 Mallory will also have access to the public key information of the client and the server.
 Keep this in mind when designing your protocol.
 
 
 ### Design Requirements
-The key exchange protocol should be **secure against a man-in-the-middle attack**.
+The key exchange protocol should be **secure against a man-in-the-middle attack** (MitM).
+The MitM will not modify the initial long-term keys exchanged.
 This means that, at the end of the exchange, only the client and the server should know their shared secret.
 
 The communication protocol should provide the following **basic cryptographic properties**:
@@ -73,9 +75,12 @@ You must issue a warning message through the user interface if integrity/authent
 
 The following properties should also be provided for maximum points:
 - **Replay protection**: you should detect if Mallory is replaying a message sent in the past, and issue a warning on the user interface.
+- **Out-of-order arrival**: since Mallory can block and replay messages, she could change the order in which messages arrive at the server.
+If she does this, the server should issue a warning.
 - **Separation of duties**: you should use a different key for encryption than the one you use for authentication/integrity. It should not be trivial to derive one key from the other.
 - **Communication efficiency**: you should use cryptographic techniques that are appropriate for sending large amounts of information efficiently.
 - **Authenticate first**: when a party receives a message, they should be able to verify authenticity before performing any other operation.
+- **Long-term keys used once per session**: you should only use the initial keys shared by client and server (long-term keys) once per session (i.e., once every time we run your program).
 
 The following properties are *optional* and provide bonus points:
 - **Forward secrecy**: if Mallory learns the key material of any party at any point during the communications, she should not be able to compromise the security of past messages she has observed.
@@ -142,9 +147,12 @@ It is recommended that you use a [virtual environment](https://docs.python.org/3
 ## Task 1: Protocol Design
 
 Your first task is to think about the protocol you will use for the VPN.
-The only key material that the client and the server have when the processes start is the following:
+We will assume that the first message exchange between the client and server (i.e., the first message each way) is **authenticated** (Mallory will not interfere with it).
+You must use this message to send a single key in each direction.
+You can use this so that, at the end of the exchange:
 - `VPN_CLIENT` has `CLIENT_PRIVATE_KEY`, `CLIENT_PUBLIC_KEY`
 - `VPN_SERVER` has `SERVER_PRIVATE_KEY`, `SERVER_PUBLIC_KEY`.
+
 
 Using this information, you must devise:
 - A key exchange protocol that the client and server run to derive a shared secret key.
@@ -203,11 +211,13 @@ The following table explains how we will grade this second deliverable:
 | **Code (200 pts)** |
 | Key agreement protects against MitM | 30 pts |
 | Confidentiality | 30 pts |
-| Integrity and Authentication | 30 pts |
-| Replay protection | 20 pts 
-| Separation of duties | 20 pts
-| Communication efficiency | 20 pts
-| Authenticate first | 20 pts
+| Integrity and Authentication | 20 pts |
+| Replay protection | 15 pts 
+| Out-of-order detection | 15 pts
+| Separation of duties | 15 pts
+| Communication efficiency | 15 pts
+| Authenticate first | 15 pts
+| Long-term keys are used once | 15 pts
 | Code quality, simplicity and succinct comments to help the grader | 30 pts
 | **Optional (40 bonus pts)**
 | Forward secrecy | 20 pts
