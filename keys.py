@@ -1,8 +1,12 @@
 # TODO setup your keys here
 # Specify format and how you generated them
 
-SERVER_PUBLIC_KEY = ""
-SERVER_PRIVATE_KEY = ""
+# Generated using these functions in crypto.py:
+# generate_keypair, and then encoded with serialize_key
+#
+# These are ECC keys exported in the DEM format and then encoded with base64
+SERVER_PUBLIC_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAECgj2BGyuCmAmtlgwD7CJrbkJYlJ8t4gDBlE1wZ+QnNvduUpuJaMKuSM9P2bU6EJH7DBznuNPDdD885tjOMrbRA=="
+SERVER_PRIVATE_KEY = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQguT3HBLkk6narkyNp1CwF7lVZnBz4nRYET9gv/SUr24ShRANCAAQKCPYEbK4KYCa2WDAPsImtuQliUny3iAMGUTXBn5Cc2925Sm4lowq5Iz0/ZtToQkfsMHOe408N0Pzzm2M4yttE"
 
-CLIENT_PUBLIC_KEY = ""
-CLIENT_PRIVATE_KEY = ""
+CLIENT_PUBLIC_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEInDjoOQWfmcQYEpqRBT/2zUcc49BMaoQ4XiSAz/VKxH3xR3zwtwNf2TdeeFDorEJfzsaq2DVVthaijiuhR/ofQ=="
+CLIENT_PRIVATE_KEY = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgNtNR0WZAaPtV59nPvxzmDSptC6kieGqENSzXuyOtIYahRANCAAQicOOg5BZ+ZxBgSmpEFP/bNRxzj0ExqhDheJIDP9UrEffFHfPC3A1/ZN154UOisQl/OxqrYNVW2FqKOK6FH+h9"
