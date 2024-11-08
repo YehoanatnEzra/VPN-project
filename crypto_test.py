@@ -9,6 +9,7 @@ from crypto import (
     parse_key,
     serialize_payload,
     validate_payload_hmac,
+    InvalidHashError
 )
 
 
@@ -127,7 +128,11 @@ def test_payload_serialization_and_parsing():
 
     assert validate_payload_hmac(payload, auth_key)
     payload["hmac"] = "invalid hmac"
-    assert not validate_payload_hmac(payload, auth_key)
+    try:
+        validate_payload_hmac(payload, auth_key), "Invalid HMAC provided: invalid hmac"
+        assert False
+    except InvalidHashError:
+        pass
 
     ciphertext, iv, nonce, parsed_pub_key = parse_payload(payload)
     assert nonce == 42

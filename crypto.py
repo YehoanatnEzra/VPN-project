@@ -6,6 +6,15 @@ from Crypto.Util.Padding import pad, unpad
 from base64 import b64encode, b64decode
 import json
 
+class InvalidHashError(Exception):
+    def __init__(self, hmac: str):
+        self.message = f"Invalid HMAC provided: {hmac}"
+        super().__init__(self.message)
+
+class InvalidNonceError(Exception):
+    def __init__(self, nonce: int, expected_nonce):
+        self.message = f"Invalid nonce provided: {nonce}. Expected: {expected_nonce}"
+        super().__init__(self.message)
 
 def kdf(x):
     """
@@ -91,14 +100,14 @@ def serialize_payload(
     hmac = HMAC.new(auth_key, dict_to_jsonb(body), digestmod=SHA256).hexdigest()
     payload = {"body": body, "hmac": hmac}
 
-    iv = bytes(cipher.iv)
-
     return json.dumps(payload)
+
+def deserialize_payload(ciphertext: str) -> dict:
+    return json.loads(ciphertext)
 
 
 def validate_payload_hmac(payload: dict, auth_key: bytes) -> bool:
     """Validates that the body and MAC match"""
-    # TODO: make sure that the callsite provides valid JSON to payload
     hmac = HMAC.new(auth_key, dict_to_jsonb(payload["body"]), digestmod=SHA256)
 
     try:
@@ -106,7 +115,7 @@ def validate_payload_hmac(payload: dict, auth_key: bytes) -> bool:
         return True
     except ValueError:
         # Could not verify HMAC
-        return False
+        raise InvalidHashError(payload["hmac"])
     except Exception:
         # unhandled exception
         raise
@@ -130,3 +139,19 @@ def decrypt(ciphertext: bytes, iv: bytes, enc_key: bytes) -> str:
 
     plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
     return plaintext.decode("utf-8")
+
+def verify_and_parse_payload(
+        message: str, expected_nonce: int, self_priv: ECC.EccKey
+) -> tuple[ECC.EccKey, bytes, bytes, bytes]:
+    """Returns a tuple with (new_pub_key, ciphertext, iv, secret) if the message is valid, otherwise raises an error"""
+
+    ack = deserialize_payload(message)
+    ciphertext, iv, nonce_received, new_pub_key = parse_payload(ack)
+    secret = generate_shared_secret(self_priv, new_pub_key)
+
+    validate_payload_hmac(ack, derive_auth_key(secret))
+
+    if not expected_nonce == nonce_received:
+        raise InvalidNonceError(nonce_received, expected_nonce)
+
+    return new_pub_key, ciphertext, iv, secret

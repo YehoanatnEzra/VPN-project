@@ -1,9 +1,12 @@
 import socket, sys
 import logging
 import tkinter as tk
+
 from keys import CLIENT_PRIVATE_KEY, CLIENT_PUBLIC_KEY
-from crypto import parse_key
+from crypto import parse_key, serialize_payload, generate_shared_secret, generate_keypair, serialize_key, \
+    derive_auth_key, derive_enc_key, verify_and_parse_payload, InvalidNonceError, InvalidHashError
 import os
+from json import JSONDecodeError
 
 HOST = "127.0.0.1"  # Replace with the remote server's IP address. Do not change unless testing on two different devices.
 # You can run server_wrapper.py on another terminal on the same device for development purposes.
@@ -40,8 +43,16 @@ class VPN_CLIENT:
         return True
 
     def encrypt(self, message: str) -> str:
-        # TODO: call and return serialize_payload(...) with the right params
-        return message
+        """encrypts the response for the client, returns a formatted and plaintext-encrypted message"""
+
+        new_key = generate_keypair()
+        secret = generate_shared_secret(new_key, self.s_pub)
+        payload = serialize_payload(message, self.nonce, new_key, derive_auth_key(secret), derive_enc_key(secret))
+
+        self.nonce += 1
+        self.c_priv = new_key
+
+        return payload
 
     def send_message(self, message: str, output: tk.Label) -> None:
         """Sends a message and gives the output to a tkinter label"""
@@ -54,17 +65,28 @@ class VPN_CLIENT:
 
         output.config(text="Sending message...")
         message = self.encrypt(message)
+
         # TODO: add a reasonable timeout and reattempt sending a message if the timeout is exceeded
         ack = self.broadcast(message)
+        try:
+            payload = verify_and_parse_payload(ack, self.nonce, self.c_priv)
 
-        # TODO: use the key contained in the ack to update the ratchet
-        # ensure this message has a unique nonce /  wasn't replayed
-        # ensure correctly formatted json, validate the hmac with validate_payload_hmac
-        # parse the ack with parse_payload(...) to get the nonce, key, etc
-        # can do something with the ciphertext if need be
+            new_s_pub, ciphertext, iv, secret = payload
+            self.s_pub = new_s_pub
+            self.nonce += 1
 
-        # Write output to interface label
-        output.config(text="Message sent!")
+            # TODO: do something with the ack/answer, we need to discuss what "to do"
+
+            # Write output to interface label
+            output.config(text="Message sent!")
+
+        # TODO: handle invalid messages according to the Error raised; we need to discuss how to handle invalid messages
+        except InvalidHashError:
+            return output.config(text="Message is invalid because of the HMAC")
+        except InvalidNonceError:
+            return output.config(text="Message is invalid because of the nonce")
+        except JSONDecodeError:
+            return output.config(text="Message is invalid because its format")
 
     # Do not modify this function
     def broadcast(self, payload: str) -> str:
