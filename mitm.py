@@ -14,15 +14,15 @@ LISTEN_PORT = 65431
 FORWARD_IP = "127.0.0.1"
 FORWARD_PORT = 65432
 
-HEADER = '\033[95m'
-OKBLUE = '\033[94m'
-OKCYAN = '\033[96m'
-OKGREEN = '\033[92m'
-WARNING = '\033[93m'
-FAIL = '\033[91m'
-ENDC = '\033[0m'
-BOLD = '\033[1m'
-UNDERLINE = '\033[4m'
+HEADER = "\033[95m"
+OKBLUE = "\033[94m"
+OKCYAN = "\033[96m"
+OKGREEN = "\033[92m"
+WARNING = "\033[93m"
+FAIL = "\033[91m"
+ENDC = "\033[0m"
+BOLD = "\033[1m"
+UNDERLINE = "\033[4m"
 
 # Buffer size for receiving data
 BUFFER_SIZE = 4096
@@ -38,13 +38,13 @@ def attack_payload(payload: str, changes: int = 5) -> str:
     for _ in range(changes):
         index = random.randint(0, len(chars))
         chars[index % len(chars)] = random.choice("abcde1234567890")
-    return ''.join(chars)
+    return "".join(chars)
 
 
 # Will not be strictly a predefined list, can be a random function
 DROP_CLIENT_TO_SERVER = {}
-CHANGE_CLIENT_TO_SERVER = {}
-DROP_SERVER_TO_CLIENT = {2}
+CHANGE_CLIENT_TO_SERVER = {1}
+DROP_SERVER_TO_CLIENT = {}
 CHANGE_SERVER_TO_CLIENT = {}
 
 
@@ -63,14 +63,18 @@ def handle_client(client_socket):
 
         ### DROP PACKET ###
         if message_number and message_number in DROP_CLIENT_TO_SERVER:
-            print(f"{WARNING}[X][{time.ctime()}] Dropping, returning empty string to client:{ENDC}")
+            print(
+                f"{WARNING}[X][{time.ctime()}] Dropping, returning empty string to client:{ENDC}"
+            )
             client_socket.sendall(bytes())
             raise AttackException("Drop client to server")
 
         ### ATTACK PAYLOAD ###
         if message_number and message_number in CHANGE_CLIENT_TO_SERVER:
-            client_data = attack_payload(client_data.decode('utf-8')).encode('utf-8')
-            print(f"{WARNING}[X][{time.ctime()}] Modifying payload to:{ENDC} {client_data}")
+            client_data = attack_payload(client_data.decode("utf-8")).encode("utf-8")
+            print(
+                f"{WARNING}[X][{time.ctime()}] Modifying payload to:{ENDC} {client_data}"
+            )
 
         # Forward the data to the target server
         forward_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -87,21 +91,28 @@ def handle_client(client_socket):
         # Receive response from the target server
         server_response = forward_socket.recv(BUFFER_SIZE)
         messages_server_to_client.append(server_response)
-        print(f"{OKBLUE}[<][{time.ctime()}] Received from server:{ENDC} {server_response}")
+        print(
+            f"{OKBLUE}[<][{time.ctime()}] Received from server:{ENDC} {server_response}"
+        )
 
         ### ATTACK RESPONSE ###
         if message_number and message_number in CHANGE_SERVER_TO_CLIENT:
-            server_response = attack_payload(server_response.decode('utf-8')).encode('utf-8')
-            print(f"{WARNING}[X][{time.ctime()}] Modifying payload to:{ENDC} {server_response}")
+            server_response = attack_payload(server_response.decode("utf-8")).encode(
+                "utf-8"
+            )
+            print(
+                f"{WARNING}[X][{time.ctime()}] Modifying payload to:{ENDC} {server_response}"
+            )
 
         ### DROP RESPONSE ###
         if message_number and message_number in DROP_SERVER_TO_CLIENT:
             server_response = bytes()
-            print(f"{WARNING}[X][{time.ctime()}] Modifying payload to:{ENDC} {server_response}")
+            print(
+                f"{WARNING}[X][{time.ctime()}] Modifying payload to:{ENDC} {server_response}"
+            )
 
         # Send the response back to the client
         client_socket.sendall(server_response)
-
 
     except AttackException as e:
         print(f"[-][{time.ctime()}] MITM Attack: {e}")
@@ -129,7 +140,9 @@ def mitm_proxy():
         while True:
             # Accept a new connection from a client
             client_socket, client_addr = listen_socket.accept()
-            print(f"{HEADER}[+][{time.ctime()}] Accepted connection from {client_addr}{ENDC}")
+            print(
+                f"{HEADER}[+][{time.ctime()}] Accepted connection from {client_addr}{ENDC}"
+            )
 
             # Handle the client in a separate function
             handle_client(client_socket)

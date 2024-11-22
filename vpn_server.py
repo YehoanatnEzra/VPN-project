@@ -1,23 +1,35 @@
 from keys import SERVER_PRIVATE_KEY, SERVER_PUBLIC_KEY
-from crypto import parse_key, generate_shared_secret, derive_auth_key, generate_keypair, derive_enc_key, \
-    InvalidNonceError, InvalidHashError
+from crypto import (
+    DroppedMessageError,
+    parse_key,
+    generate_shared_secret,
+    derive_auth_key,
+    generate_keypair,
+    derive_enc_key,
+    InvalidNonceError,
+    InvalidHashError,
+)
 import os
 from json import JSONDecodeError
-from message import Message, KEYWORD_FOR_FORGED
+from message import Message
 
 
 class VPN_SERVER:
     def __init__(self, output_file):
         # pycrypto EccKey objects containing the current keys to use for the ratchet
-        self.c_pub = None  # Client public key, set only when the connection is established
+        self.c_pub = (
+            None  # Client public key, set only when the connection is established
+        )
 
         self.s_priv = parse_key(SERVER_PRIVATE_KEY)  # Server private/public keypair
         self.nonce = 0
         self.output_file = output_file
         self.output_file.truncate(0)  # Clear file content (new session)
         self.logged_integrity_warning = False
-        self.logged_availability_warning = False
-        self.ciphertext_log = set()
+        self.logged_general_warning = False
+
+        # used in case the client retries because it didnt get an ack and we need to resend using the old keys
+        self.prev_s_priv = None
 
         # for debugging only: (TODO delete)
         filename = os.path.join(os.path.dirname(__file__), "debug.txt")
@@ -40,30 +52,63 @@ class VPN_SERVER:
             self.debug("server expecting nonce " + str(self.nonce) + "\n")
             client_mes_dict = Message.deserialize_payload(ciphertext)
             self.debug(str(client_mes_dict) + "\n")
-            self.check_for_replay(client_mes_dict)  # This must happen before verification
             new_s_pub = Message.get_new_pub_key(client_mes_dict)
             secret = generate_shared_secret(self.s_priv, parse_key(new_s_pub))
-            msg = Message.verify_and_parse(client_mes_dict, derive_auth_key(secret), derive_enc_key(secret), self.nonce)
+            msg = Message.verify_and_parse(
+                client_mes_dict,
+                derive_auth_key(secret),
+                derive_enc_key(secret),
+                self.nonce,
+            )
             plaintext = msg.decrypt(derive_enc_key(secret))
-            self.debug("server received message " + plaintext[:-1] + " with correct nonce\n")
+            self.debug(
+                "server received message " + plaintext[:-1] + " with correct nonce\n"
+            )
             self.log_content(plaintext)
             self.log_warnings(msg)  # Log warnings detected by client
             self.c_pub = parse_key(new_s_pub)
+
             self.nonce += 1
 
         # Log warnings detected by server
-        except (InvalidHashError, JSONDecodeError) as e:  # Integrity
-            self.debug("server exception: " + str(e) + "\n")
-            self.debug("integrity server\n")
-            self.log_integrity_warning()
-            self.debug("sending empty string\n")
-            return KEYWORD_FOR_FORGED  # notify client that message was forged, so it can resend
-        except InvalidNonceError:  # Replay
+        except (InvalidHashError, JSONDecodeError):  # Integrity
+            # this may just be a resent message using the old keys! check if this message is valid with old server priv key
+            try:
+                client_mes_dict = Message.deserialize_payload(ciphertext)
+                new_s_pub = Message.get_new_pub_key(client_mes_dict)
+                secret = generate_shared_secret(self.prev_s_priv, parse_key(new_s_pub))
+                msg = Message.verify_and_parse(
+                    client_mes_dict,
+                    derive_auth_key(secret),
+                    derive_enc_key(secret),
+                    self.nonce - 2,
+                )
+                self.log_warnings(msg)  # Log warnings detected by client
+
+            except (InvalidHashError, JSONDecodeError) as e:
+                self.debug("server exception: " + str(e) + "\n")
+                self.debug("integrity server\n")
+                self.log_integrity_warning()
+                return "what goes around comes around: invalid message, invalid response :)"  # notify client that message was forged, forcing a resend
+            except (InvalidNonceError, DroppedMessageError):
+                self.debug("availability server\n")
+                self.log_general_warning()
+                return ""
+
+            self.debug(
+                "server: client mustve not received valid ack because it resent its last message! let's send back an ack with these old keys and dec the nonce\n"
+            )
+            self.nonce -= 1
+            self.s_priv = self.prev_s_priv  # set private key to the previous one
+
+        except (InvalidNonceError, DroppedMessageError):
             self.debug("availability server\n")
-            self.log_availability_warning()
+            self.log_general_warning()
 
         self.debug("server nonce: " + str(self.nonce) + "\n")
-        return self.send_ack("ack for " + plaintext[:-1] + " with nonce " + str(self.nonce) + "\n")
+        return self.send_ack(
+            "ack for " + plaintext[:-1] + " with nonce " + str(self.nonce) + "\n"
+        )
 
     def send_ack(self, message_text: str = "ack") -> str:
         """
@@ -76,21 +121,27 @@ class VPN_SERVER:
         Returns:
             str: A serialized string (JSON format) representing the constructed message, ready to be sent to the client.
         """
-        self.debug("server sending " + message_text)
         new_key = generate_keypair()
+        if self.c_pub is None:
+            raise Exception(
+                "No client public key stored server side. Likely a developer error"
+            )
+
         secret = generate_shared_secret(new_key, self.c_pub)
-        msg = Message(self.nonce, message_text, derive_auth_key(secret), derive_enc_key(secret), new_key)
+        msg = Message(
+            self.nonce,
+            message_text,
+            derive_auth_key(secret),
+            derive_enc_key(secret),
+            new_key,
+        )
         message_to_send = msg.prepare_for_sending()
+        self.prev_s_priv = self.s_priv
         self.s_priv = new_key
         self.nonce += 1
-        return message_to_send
 
-    def check_for_replay(self, data: dict):
-        text = Message.extract_text(data)
-        if text in self.ciphertext_log:
-            self.debug("replay found\n")
-            raise InvalidNonceError
-        self.ciphertext_log.add(text)
+        self.debug("server sending: " + message_to_send)
+        return message_to_send
 
     def output(self, message: str) -> None:
         """You should not need to modify this function.
@@ -99,14 +150,14 @@ class VPN_SERVER:
         self.output_file.write(message)
         self.output_file.flush()
 
-    def log_availability_warning(self):
-        if not self.logged_availability_warning:
-            self.output("This is an availability warning.\n")
-            self.logged_availability_warning = True
+    def log_general_warning(self):
+        if not self.logged_general_warning:
+            self.output("Mallory detected: General warning!\n")
+            self.logged_general_warning = True
 
     def log_integrity_warning(self):
         if not self.logged_integrity_warning:
-            self.output("This is an integrity warning.\n")
+            self.output("Mallory detected: Integrity warning!\n")
             self.logged_integrity_warning = True
 
     def log_content(self, content: str) -> None:
@@ -114,9 +165,9 @@ class VPN_SERVER:
             self.output(content)
 
     def log_warnings(self, msg: Message) -> None:
-        if msg.is_availability_warning():
-            self.log_availability_warning()
-        elif msg.is_integrity_warning():
+        if msg.is_general_warning():
+            self.log_general_warning()
+        if msg.is_integrity_warning():
             self.log_integrity_warning()
 
     # TODO delete this:

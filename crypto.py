@@ -7,27 +7,29 @@ from base64 import b64encode, b64decode
 import json
 
 
-class InvalidHashError(Exception):
-    def __init__(self, hmac: str):
-        self.message = f"Invalid HMAC provided: {hmac}"
+class IntegrityError(Exception):
+    def __init__(self, msg="Message does not pass integrity checks"):
+        self.message = msg
         super().__init__(self.message)
+
+
+class InvalidHashError(IntegrityError):
+    def __init__(self, hmac: str):
+        message = f"Invalid HMAC provided: {hmac}"
+        super().__init__(message)
 
 
 class InvalidNonceError(Exception):
     def __init__(self, nonce: int, expected_nonce):
-        self.message = f"Invalid nonce provided: {nonce}. Expected: {expected_nonce}"
-        super().__init__(self.message)
+        message = f"Invalid nonce provided: {nonce}. Expected: {expected_nonce}"
+        self.nonce = nonce
+        super().__init__(message)
 
 
-class InvalidAckError(Exception):
+class DroppedMessageError(Exception):
     def __init__(self):
-        self.message = "Empty acks are Mallory drops!"
-        super().__init__(self.message)
-
-class ForgedMessageError(Exception):
-    def __init__(self):
-        self.message = "Message was forged"
-        super().__init__(self.message)
+        message = "Empty acks are drops messages"
+        super().__init__(message)
 
 
 def kdf(x):
@@ -84,11 +86,25 @@ def serialize_key(key: ECC.EccKey) -> tuple[str, str]:
 
 def parse_key(der_b64: str) -> ECC.EccKey:
     """Loads an ECC key (private or public) into a pycrpto EccKey object from its base64-encoded DER format"""
-    return ECC.import_key(b64decode(der_b64))
+    try:
+        key = ECC.import_key(b64decode(der_b64))
+    except ValueError:  # key got modified, it's Invalid
+        raise IntegrityError()
+    return key
 
 
 def dict_to_jsonb(d: dict) -> bytes:
-    return json.dumps(d).encode("utf-8")
+    def recursive_sets_to_lists(x):
+        if isinstance(x, dict):
+            return {key: recursive_sets_to_lists(value) for key, value in x.items()}
+        elif isinstance(x, set):
+            return list(x)
+        elif isinstance(x, list):
+            return [recursive_sets_to_lists(elem) for elem in x]
+        else:
+            return x
+
+    return json.dumps(recursive_sets_to_lists(d)).encode("utf-8")
 
 
 def encrypt(plaintext: str, enc_key: bytes) -> tuple:

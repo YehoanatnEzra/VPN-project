@@ -2,8 +2,18 @@ import socket, sys
 import tkinter as tk
 import crypto
 from keys import CLIENT_PRIVATE_KEY, CLIENT_PUBLIC_KEY
-from crypto import parse_key, generate_shared_secret, generate_keypair, serialize_key, \
-    derive_auth_key, derive_enc_key, InvalidNonceError, InvalidHashError, InvalidAckError, ForgedMessageError
+from crypto import (
+    parse_key,
+    generate_shared_secret,
+    generate_keypair,
+    serialize_key,
+    derive_auth_key,
+    derive_enc_key,
+    InvalidNonceError,
+    InvalidHashError,
+    DroppedMessageError,
+    IntegrityError,
+)
 import os
 from json import JSONDecodeError
 from message import Message
@@ -17,16 +27,17 @@ MAX_RETRIES = 5
 
 
 class VPN_CLIENT:
-
     def __init__(self):
         # pycrypto EccKey objects containing the current keys to use for the ratchet
-        self.s_pub = None  # Server public key, set only when the connection is established
+        self.s_pub = (
+            None  # Server public key, set only when the connection is established
+        )
         self.c_priv = parse_key(CLIENT_PRIVATE_KEY)  # Client private/public keypair
         self.nonce = 0
         self.detected_integrity_error = False
-        self.detected_availability_error = False
+        self.detected_general_error = False
         self.sent_integrity_warning = False
-        self.sent_availability_warning = False
+        self.sent_general_warning = False
 
         # for debugging only: (TODO delete)
         filename = os.path.join(os.path.dirname(__file__), "debug.txt")
@@ -50,66 +61,86 @@ class VPN_CLIENT:
 
         new_key = generate_keypair()
         self.c_priv = new_key
+        if self.s_pub is None:
+            raise Exception("No server public key stored! This is likely a dev error.")
+
         secret = generate_shared_secret(new_key, self.s_pub)
-        msg = Message(self.nonce, message, derive_auth_key(secret), derive_enc_key(secret), new_key)
+        msg = Message(
+            self.nonce,
+            message,
+            derive_auth_key(secret),
+            derive_enc_key(secret),
+            new_key,
+        )
 
         # A call to this function might be for sending a warning
         if self.detected_integrity_error and not self.sent_integrity_warning:
             msg.set_integrity_warning()
-        elif self.detected_availability_error and not self.sent_availability_warning:
-            msg.set_availability_warning()
+        elif self.detected_general_error and not self.sent_general_warning:
+            msg.set_general_warning()
 
         output.config(text="Encrypting message")
         message_to_send = msg.prepare_for_sending()
 
         output.config(text="Sending message...")
-        self.debug("client sending message " + message[:-1] + " with nonce " + str(self.nonce) + "\n")
+        self.debug(
+            "client sending message "
+            + message[:-1]
+            + " with nonce "
+            + str(self.nonce)
+            + "\n"
+        )
         ack = self.broadcast(message_to_send)
-        self.nonce += 1
         try:
             self.handle_response_message(ack, output)
-        except InvalidAckError:  # Message or ack were dropped - availability error
-            self.debug("client received empty ack, resending\n")
-            msg.set_availability_warning()
+        except (
+            DroppedMessageError,
+            InvalidNonceError,
+        ):  # Message or ack were dropped - availability error
+            self.debug("client received empty ack or replay, resending\n")
+            msg.set_general_warning()
             self.resend(msg, output)
-        except ForgedMessageError:  # Message was forged (server already knows about integrity error)
+        except (IntegrityError, JSONDecodeError):  # Server ack was forged
+            self.debug("client received invalid ack, resending")
+            msg.set_integrity_warning()
             self.resend(msg, output)
 
     def handle_response_message(self, server_m: str, output: tk.Label) -> None:
-        try:
-            self.debug("client expecting nonce " + str(self.nonce) + "\n")
-            ack_dict = Message.deserialize_payload(server_m)
-            print(ack_dict)
-            new_s_pub = Message.get_new_pub_key(ack_dict)
-            secret = generate_shared_secret(self.c_priv, crypto.parse_key(new_s_pub))
-            msg = Message.verify_and_parse(ack_dict, derive_auth_key(secret), derive_enc_key(secret), self.nonce)
-            plaintext = msg.decrypt(derive_enc_key(secret))
-            self.debug("client received " + plaintext + "\n")
-            self.s_pub = crypto.parse_key(new_s_pub)
-            self.nonce += 1
-            output.config(text="Message sent!")
+        server_nonce = self.nonce + 1
 
-        # Client detected error in ack, notify the server
-        except (InvalidHashError, JSONDecodeError) as e:  # integrity
-            self.debug("client exception: " + str(e) + "\n")
-            self.debug("integrity client\n")
-            self.send_integrity_warning(output)
-        except InvalidNonceError:  # replay
-            self.debug("availability client\n")
-            self.send_availability_warning(output)
+        self.debug("client expecting nonce " + str(server_nonce) + "\n")
+        ack_dict = Message.deserialize_payload(server_m)
+        print(ack_dict)
+        new_s_pub = Message.get_new_pub_key(ack_dict)
+        secret = generate_shared_secret(self.c_priv, crypto.parse_key(new_s_pub))
+        msg = Message.verify_and_parse(
+            ack_dict, derive_auth_key(secret), derive_enc_key(secret), server_nonce
+        )
+        plaintext = msg.decrypt(derive_enc_key(secret))
+        self.debug("client received " + plaintext + "\n")
+        self.s_pub = crypto.parse_key(new_s_pub)
+        self.nonce = server_nonce + 1
+        output.config(text="Message sent!")
 
     def resend(self, msg: Message, output: tk.Label) -> None:
         """Resends msg after first attempt failed, this time with an availability warning. Tries MAX_RETRIES times."""
         # This function is crucial - we can't use send_message, because we must keep the original ciphertext
-        self.debug("client availability, resending\n")
+        self.debug("client resending\n")
         message_to_send = msg.prepare_for_sending()  # Does not re-encrypt
         for _ in range(MAX_RETRIES):
             try:
                 ack = self.broadcast(message_to_send)
                 self.handle_response_message(ack, output)
                 return
-            except InvalidAckError:
-                continue
+            except (
+                DroppedMessageError,
+                InvalidNonceError,
+            ):  # Message or ack were dropped - availability error
+                self.debug("client received empty ack, resending\n")
+                msg.set_general_warning()
+            except (IntegrityError, JSONDecodeError):  # Server ack was forged
+                self.debug("client received invalid ack, resending")
+                msg.set_integrity_warning()
 
     def send_integrity_warning(self, output: tk.Label) -> None:
         if not self.sent_integrity_warning:
@@ -117,11 +148,11 @@ class VPN_CLIENT:
             self.send_message("", output)
             self.sent_integrity_warning = True  # this is after it's been acked
 
-    def send_availability_warning(self, output: tk.Label) -> None:
-        if not self.sent_availability_warning:
-            self.detected_availability_error = True
+    def send_general_warning(self, output: tk.Label) -> None:
+        if not self.sent_general_warning:
+            self.detected_general_error = True
             self.send_message("", output)
-            self.sent_availability_warning = True  # this is after it's been acked
+            self.sent_general_warning = True  # this is after it's been acked
 
     # Do not modify this function
     def broadcast(self, payload: str) -> str:
