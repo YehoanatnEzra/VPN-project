@@ -1,6 +1,7 @@
 from keys import SERVER_PRIVATE_KEY, SERVER_PUBLIC_KEY
 from crypto import (
     DroppedMessageError,
+    IntegrityError,
     parse_key,
     generate_shared_secret,
     derive_auth_key,
@@ -71,7 +72,7 @@ class VPN_SERVER:
             self.nonce += 1
 
         # Log warnings detected by server
-        except (InvalidHashError, JSONDecodeError):  # Integrity
+        except (IntegrityError, JSONDecodeError):  # Integrity
             # this may just be a resent message using the old keys! check if this message is valid with old server priv key
             try:
                 client_mes_dict = Message.deserialize_payload(ciphertext)
@@ -85,7 +86,7 @@ class VPN_SERVER:
                 )
                 self.log_warnings(msg)  # Log warnings detected by client
 
-            except (InvalidHashError, JSONDecodeError) as e:
+            except (IntegrityError, JSONDecodeError) as e:
                 self.debug("server exception: " + str(e) + "\n")
                 self.debug("integrity server\n")
                 self.log_integrity_warning()

@@ -42,10 +42,10 @@ def attack_payload(payload: str, changes: int = 5) -> str:
 
 
 # Will not be strictly a predefined list, can be a random function
-DROP_CLIENT_TO_SERVER = {}
-CHANGE_CLIENT_TO_SERVER = {1}
-DROP_SERVER_TO_CLIENT = {}
-CHANGE_SERVER_TO_CLIENT = {}
+DROP_CLIENT_TO_SERVER = {3, 7, 11, 12}
+CHANGE_CLIENT_TO_SERVER = {2, 6, 10}
+DROP_SERVER_TO_CLIENT = {1, 5, 8}
+CHANGE_SERVER_TO_CLIENT = {4, 9}
 
 
 def handle_client(client_socket):
