@@ -6,11 +6,9 @@ from crypto import (
     parse_key,
     generate_shared_secret,
     generate_keypair,
-    serialize_key,
     derive_auth_key,
     derive_enc_key,
     InvalidNonceError,
-    InvalidHashError,
     DroppedMessageError,
     IntegrityError,
 )
@@ -23,7 +21,7 @@ HOST = "127.0.0.1"  # Replace with the remote server's IP address. Do not change
 # You can run server_wrapper.py on another terminal on the same device for development purposes.
 PORT = 65431  # Port the server is listening on
 TIMEOUT = 20  # 20 second timeout
-MAX_RETRIES = 5
+MAX_RETRIES = 1000
 
 
 class VPN_CLIENT:
@@ -141,6 +139,10 @@ class VPN_CLIENT:
             except (IntegrityError, JSONDecodeError):  # Server ack was forged
                 self.debug("client received invalid ack, resending")
                 msg.set_integrity_warning()
+
+        raise Exception(
+            f"Probably no connection. {MAX_RETRIES} retries with no response."
+        )
 
     def send_integrity_warning(self, output: tk.Label) -> None:
         if not self.sent_integrity_warning:
