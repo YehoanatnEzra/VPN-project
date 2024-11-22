@@ -6,15 +6,29 @@ from Crypto.Util.Padding import pad, unpad
 from base64 import b64encode, b64decode
 import json
 
+
 class InvalidHashError(Exception):
     def __init__(self, hmac: str):
         self.message = f"Invalid HMAC provided: {hmac}"
         super().__init__(self.message)
 
+
 class InvalidNonceError(Exception):
     def __init__(self, nonce: int, expected_nonce):
         self.message = f"Invalid nonce provided: {nonce}. Expected: {expected_nonce}"
         super().__init__(self.message)
+
+
+class InvalidAckError(Exception):
+    def __init__(self):
+        self.message = "Empty acks are Mallory drops!"
+        super().__init__(self.message)
+
+class ForgedMessageError(Exception):
+    def __init__(self):
+        self.message = "Message was forged"
+        super().__init__(self.message)
+
 
 def kdf(x):
     """
@@ -77,30 +91,12 @@ def dict_to_jsonb(d: dict) -> bytes:
     return json.dumps(d).encode("utf-8")
 
 
-def serialize_payload(
-    plaintext: str, nonce: int, new_pub_key: ECC.EccKey, auth_key: bytes, enc_key: bytes
-) -> str:
-    """
-    Serializes an encrypted message to be sent between the client and server
-    (Can be used for acknowledgements and messages)
-    """
+def encrypt(plaintext: str, enc_key: bytes) -> tuple:
     cipher = AES.new(enc_key, AES.MODE_CBC)
     iv = cipher.iv.hex()
     ciphertext = cipher.encrypt(pad(plaintext.encode("utf-8"), AES.block_size)).hex()
+    return iv, ciphertext
 
-    _, pubk = serialize_key(new_pub_key)
-
-    body = {
-        "ciphertext": ciphertext,
-        "iv": iv,
-        "nonce": nonce,
-        "new_pub_key": pubk,
-    }
-
-    hmac = HMAC.new(auth_key, dict_to_jsonb(body), digestmod=SHA256).hexdigest()
-    payload = {"body": body, "hmac": hmac}
-
-    return json.dumps(payload)
 
 def deserialize_payload(ciphertext: str) -> dict:
     return json.loads(ciphertext)
@@ -126,7 +122,7 @@ def parse_payload(payload: dict) -> tuple[bytes, bytes, int, ECC.EccKey]:
 
     body = payload["body"]
 
-    ciphertext = bytes.fromhex(body["ciphertext"])
+    ciphertext = bytes.fromhex(body["text"])
     iv = bytes.fromhex(body["iv"])
     nonce = body["nonce"]
     new_pub_key = parse_key(body["new_pub_key"])
@@ -140,18 +136,6 @@ def decrypt(ciphertext: bytes, iv: bytes, enc_key: bytes) -> str:
     plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
     return plaintext.decode("utf-8")
 
-def verify_and_parse_payload(
-        message: str, expected_nonce: int, self_priv: ECC.EccKey
-) -> tuple[ECC.EccKey, bytes, bytes, bytes]:
-    """Returns a tuple with (new_pub_key, ciphertext, iv, secret) if the message is valid, otherwise raises an error"""
 
-    ack = deserialize_payload(message)
-    ciphertext, iv, nonce_received, new_pub_key = parse_payload(ack)
-    secret = generate_shared_secret(self_priv, new_pub_key)
-
-    validate_payload_hmac(ack, derive_auth_key(secret))
-
-    if not expected_nonce == nonce_received:
-        raise InvalidNonceError(nonce_received, expected_nonce)
-
-    return new_pub_key, ciphertext, iv, secret
+def compute_hmac(auth_key: bytes, msg_body: bytes):
+    return HMAC.new(auth_key, msg_body, digestmod=SHA256)

@@ -15,8 +15,9 @@ if __name__ == "__main__":
 
     message_entry = tk.Text(root, width=50, height=5)
     result_label = tk.Label(root, text="Status")
-    send_button = tk.Button(root, text="Send", command=lambda: CLIENT.send_message(message_entry.get("1.0", 'end'), result_label))
-    
+    send_button = tk.Button(root, text="Send",
+                            command=lambda: CLIENT.send_message(message_entry.get("1.0", 'end'), result_label))
+
     message_entry.pack(pady=5)
     send_button.pack(pady=10)
     result_label.pack(pady=10)

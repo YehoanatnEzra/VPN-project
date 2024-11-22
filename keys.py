@@ -1,6 +1,3 @@
-# TODO setup your keys here
-# Specify format and how you generated them
-
 # Generated using these functions in crypto.py:
 # generate_keypair, and then encoded with serialize_key
 #

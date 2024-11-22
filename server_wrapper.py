@@ -6,6 +6,7 @@ from vpn_server import VPN_SERVER
 HOST = '0.0.0.0'  # Listen on all available interfaces
 PORT = 65432  # Port to listen on (non-privileged ports are > 1023)
 
+
 def start_server(server: VPN_SERVER):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, PORT))
@@ -20,9 +21,10 @@ def start_server(server: VPN_SERVER):
                     if not data:
                         break  # If no data is received, break out of the loop
                     response = server.receive(data.decode('utf-8'))
-                    
+
                     # Send acknowledgment back to the client
                     conn.sendall(response.encode('utf-8'))
+
 
 if __name__ == '__main__':
     filename = os.path.join(os.path.dirname(__file__), "server_output.txt")
