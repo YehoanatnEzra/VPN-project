@@ -41,9 +41,9 @@ class VPN_SERVER:
                 return ACK_FOR_REPLAY_OR_DROP
             else:
                 raise e1
-        return self.send_ack("ack for " + plaintext[:-1])
+        return self.prepare_ack("ack for " + plaintext[:-1])
 
-    def send_ack(self, message_text: str = "ack") -> str:
+    def prepare_ack(self, message_text: str = "ack") -> str:
         """
         Creates a new encrypted message to be sent to the client according to communication protocol.
         It generates a new key pair, derives encryption and authentication keys using a shared secret, and constructs
