@@ -81,7 +81,7 @@ def handle_client(client_socket):
         forward_socket.connect((FORWARD_IP, FORWARD_PORT))
 
         ### REPLAY A PREVIOUS ###
-        REPLAY = random.randint(1, 100)
+        REPLAY = random.randint(1, 8)
         if message_number and REPLAY < len(messages_client_to_server):
             forward_socket.sendall(messages_client_to_server[REPLAY])
             forward_socket.recv(BUFFER_SIZE)

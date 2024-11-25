@@ -1,37 +1,23 @@
-from json import JSONDecodeError
-
 from Crypto.PublicKey import ECC
-from Crypto.Hash import SHA256, HMAC
-import json
-import crypto
-from crypto import (
-    serialize_key,
-    dict_to_jsonb,
-    InvalidHashError,
-    InvalidNonceError,
-    compute_hmac,
-    DroppedMessageError,
-    IntegrityError,
-)
+from crypto import *
 
 # =========================================================================================== #
 GENERAL_WARNING = 1
 INTEGRITY_WARNING = 2
+
+
 # =========================================================================================== #
 
 
 class Message:
-    def __init__(
-        self,
-        nonce: int,
-        text: str,
-        auth_key: bytes,
-        enc_key: bytes,
-        new_pub_key: ECC.EccKey,
-        warnings: list[int] = [],
-        encrypted: bool = False,
-        iv="",
-    ):
+    def __init__(self,
+                 nonce: int,
+                 text: str,
+                 secret: bytes,
+                 new_pub_key: ECC.EccKey,
+                 warnings: list[int] = [],
+                 encrypted: bool = False,
+                 iv=""):
         """
         Method instantiates a new message.
 
@@ -52,14 +38,14 @@ class Message:
         self.iv = iv
         self.encrypted = encrypted
         self.nonce = nonce
-        self.auth_key = auth_key
-        self.enc_key = enc_key
+        self.auth_key = derive_auth_key(secret)
+        self.enc_key = derive_enc_key(secret)
         self.new_p_key = new_pub_key
 
     def prepare_for_sending(self) -> str:
         """returns a formatted and encrypted message as a string, ready to send"""
         if not self.encrypted:
-            self.iv, self.text = crypto.encrypt(self.text, self.enc_key)
+            self.iv, self.text = encrypt(self.text, self.enc_key)
             self.encrypted = True
         _, pubk = serialize_key(self.new_p_key)
 
@@ -68,25 +54,19 @@ class Message:
             "text": self.text,
             "iv": self.iv,
             "nonce": self.nonce,
-            "new_pub_key": pubk,
-        }
+            "new_pub_key": pubk}
 
-        hmac = HMAC.new(
-            self.auth_key, dict_to_jsonb(body), digestmod=SHA256
-        ).hexdigest()
+        hmac = HMAC.new(self.auth_key, dict_to_jsonb(body), digestmod=SHA256).hexdigest()
         payload = {"body": body, "hmac": hmac}
-
         return json.dumps(payload)
 
-    def decrypt(self, enc_key: bytes) -> str:
+    def msg_decrypt(self, enc_key: bytes) -> str:
         """
         Decrypts the text in a message using the given encryption key.
         """
         if not self.encrypted:
             return self.text
-        self.text = crypto.decrypt(
-            bytes.fromhex(self.text), bytes.fromhex(self.iv), enc_key
-        )
+        self.text = decrypt(bytes.fromhex(self.text), bytes.fromhex(self.iv), enc_key)
         self.encrypted = False
         return self.text
 
@@ -96,12 +76,6 @@ class Message:
         Returns the new public key from a dictionary representation of the message object.
         """
         body = data.get("body")
-
-        if body is None or body.get("new_pub_key") is None:
-            raise Exception(
-                "Likely a dev error. pub key was retrieved from an invalid body"
-            )
-
         return body.get("new_pub_key")
 
     @staticmethod
@@ -121,22 +95,16 @@ class Message:
     @staticmethod
     def extract_text(data: dict) -> str:
         body = data.get("body")
-
-        if body is None or body.get("new_pub_key") is None:
-            raise Exception(
-                "Likely a dev error. text was retrieved from an invalid body"
-            )
-
         return body.get("text")
 
     @staticmethod
-    def verify_and_parse(
-        data: dict, auth_key: bytes, enc_key: bytes, expected_nonce: int
-    ) -> "Message":
+    def verify_and_parse(data: dict, secret, expected_nonce: int) -> "Message":
         """
         This method assumes the data is encrypted.
         Takes in a dictionary representation of a message and returns a message object.
         """
+        auth_key = derive_auth_key(secret)
+        enc_key = derive_enc_key(secret)
         msg_body = data.get("body")
         if msg_body is None:
             raise IntegrityError("Invalid body supplied to verify_and_parse")
@@ -148,18 +116,11 @@ class Message:
         except ValueError:
             raise InvalidHashError(data["hmac"])
 
-        if expected_nonce != msg_body.get("nonce"):
+        if expected_nonce > msg_body.get("nonce"):
             raise InvalidNonceError(msg_body.get("nonce"), expected_nonce)
-        return Message(
-            msg_body.get("nonce"),
-            msg_body.get("text"),
-            auth_key,
-            enc_key,
-            msg_body.get("new_pub_key"),
-            msg_body.get("warnings"),
-            True,
-            msg_body.get("iv"),
-        )
+        return Message(msg_body.get("nonce"),
+                       msg_body.get("text"), secret, msg_body.get("new_pub_key"),
+                       msg_body.get("warnings"), True, msg_body.get("iv"))
 
     def set_general_warning(self) -> None:
         if GENERAL_WARNING not in self.warnings:

@@ -1,45 +1,29 @@
 from keys import SERVER_PRIVATE_KEY, SERVER_PUBLIC_KEY
-from crypto import (
-    DroppedMessageError,
-    IntegrityError,
-    parse_key,
-    generate_shared_secret,
-    derive_auth_key,
-    generate_keypair,
-    derive_enc_key,
-    InvalidNonceError,
-    InvalidHashError,
-)
+from crypto import *
 import os
 from json import JSONDecodeError
 from message import Message
+
+ACK_FOR_FORGED = "what goes around comes around: invalid message, invalid response :)"
+ACK_FOR_REPLAY_OR_DROP = "go away, mallory"
 
 
 class VPN_SERVER:
     def __init__(self, output_file):
         # pycrypto EccKey objects containing the current keys to use for the ratchet
-        self.c_pub = (
-            None  # Client public key, set only when the connection is established
-        )
-
+        self.c_pub = None  # Client public key, set only when the connection is established
+        self.message_cache = set()  # To detect replays
         self.s_priv = parse_key(SERVER_PRIVATE_KEY)  # Server private/public keypair
         self.nonce = 0
         self.output_file = output_file
         self.output_file.truncate(0)  # Clear file content (new session)
         self.logged_integrity_warning = False
         self.logged_general_warning = False
+        self.prev_s_priv = None  # In case the client resends, and we need to verify with old keys
 
-        # used in case the client retries because it didnt get an ack and we need to resend using the old keys
-        self.prev_s_priv = None
-
-        # for debugging only: (TODO delete)
-        filename = os.path.join(os.path.dirname(__file__), "debug.txt")
-        self.debug_file = open(filename, "a")
-        self.debug_file.truncate(0)
-
-    def needs_key_exchange(self):
-        """Used to check if this is the first message, guaranteed to be untampered with"""
-        return self.c_pub is None
+    def is_replay(self, ciphertext):
+        msg_hash = SHA256.new(ciphertext.encode("utf-8")).digest()
+        return msg_hash not in self.message_cache
 
     def receive(self, ciphertext: str) -> str:
         """processes the ciphertext and returns an ack string ready to be sent to the client"""
@@ -47,69 +31,21 @@ class VPN_SERVER:
             # assume the first message is the initial pub key from the client
             self.c_pub = parse_key(ciphertext)
             return SERVER_PUBLIC_KEY
-
         plaintext = " "
         try:
-            self.debug("server expecting nonce " + str(self.nonce) + "\n")
-            client_mes_dict = Message.deserialize_payload(ciphertext)
-            self.debug(str(client_mes_dict) + "\n")
-            new_s_pub = Message.get_new_pub_key(client_mes_dict)
-            secret = generate_shared_secret(self.s_priv, parse_key(new_s_pub))
-            msg = Message.verify_and_parse(
-                client_mes_dict,
-                derive_auth_key(secret),
-                derive_enc_key(secret),
-                self.nonce,
-            )
-            plaintext = msg.decrypt(derive_enc_key(secret))
-            self.debug(
-                "server received message " + plaintext[:-1] + " with correct nonce\n"
-            )
-            self.log_content(plaintext)
-            self.log_warnings(msg)  # Log warnings detected by client
-            self.c_pub = parse_key(new_s_pub)
-
-            self.nonce += 1
-
-        # Log warnings detected by server
-        except (IntegrityError, JSONDecodeError):  # Integrity
-            # this may just be a resent message using the old keys! check if this message is valid with old server priv key
-            try:
-                client_mes_dict = Message.deserialize_payload(ciphertext)
-                new_s_pub = Message.get_new_pub_key(client_mes_dict)
-                secret = generate_shared_secret(self.prev_s_priv, parse_key(new_s_pub))
-                msg = Message.verify_and_parse(
-                    client_mes_dict,
-                    derive_auth_key(secret),
-                    derive_enc_key(secret),
-                    self.nonce - 2,
-                )
-                self.log_warnings(msg)  # Log warnings detected by client
-
-            except (IntegrityError, JSONDecodeError) as e:
-                self.debug("server exception: " + str(e) + "\n")
-                self.debug("integrity server\n")
-                self.log_integrity_warning()
-                return "what goes around comes around: invalid message, invalid response :)"  # notify client that message was forged, forcing a resend
-            except (InvalidNonceError, DroppedMessageError):
-                self.debug("availability server\n")
+            self.process_ciphertext(ciphertext)
+        except Exception as e1:  # Detected security issue
+            if is_integrity_error(e1):  # Suspected as integrity, but let's make sure
+                try:
+                    self.process_ciphertext_with_old_keys(ciphertext)  # Maybe a resend from the client?
+                except Exception as e2:
+                    return self.replay_or_forge(ciphertext, e2)
+            elif is_general_error(e1):
                 self.log_general_warning()
-                return ""
-
-            self.debug(
-                "server: client mustve not received valid ack because it resent its last message! let's send back an ack with these old keys and dec the nonce\n"
-            )
-            self.nonce -= 1
-            self.s_priv = self.prev_s_priv  # set private key to the previous one
-
-        except (InvalidNonceError, DroppedMessageError):
-            self.debug("availability server\n")
-            self.log_general_warning()
-
-        self.debug("server nonce: " + str(self.nonce) + "\n")
-        return self.send_ack(
-            "ack for " + plaintext[:-1] + " with nonce " + str(self.nonce) + "\n"
-        )
+                return ACK_FOR_REPLAY_OR_DROP
+            else:
+                raise e1
+        return self.send_ack("ack for " + plaintext[:-1])
 
     def send_ack(self, message_text: str = "ack") -> str:
         """
@@ -123,26 +59,58 @@ class VPN_SERVER:
             str: A serialized string (JSON format) representing the constructed message, ready to be sent to the client.
         """
         new_key = generate_keypair()
-        if self.c_pub is None:
-            raise Exception(
-                "No client public key stored server side. Likely a developer error"
-            )
-
         secret = generate_shared_secret(new_key, self.c_pub)
-        msg = Message(
-            self.nonce,
-            message_text,
-            derive_auth_key(secret),
-            derive_enc_key(secret),
-            new_key,
-        )
+        msg = Message(self.nonce, message_text, secret, new_key)
         message_to_send = msg.prepare_for_sending()
         self.prev_s_priv = self.s_priv
         self.s_priv = new_key
-        self.nonce += 1
-
-        self.debug("server sending: " + message_to_send)
+        self.cache(message_to_send)  # so that acks are also never replayed
         return message_to_send
+
+    def process_ciphertext(self, ciphertext):
+        client_mes_dict = Message.deserialize_payload(ciphertext)
+        new_s_pub = Message.get_new_pub_key(client_mes_dict)
+        secret = generate_shared_secret(self.s_priv, parse_key(new_s_pub))
+        msg = Message.verify_and_parse(client_mes_dict, secret, self.nonce)
+        plaintext = msg.msg_decrypt(derive_enc_key(secret))
+        self.log_content(plaintext)
+        self.log_warnings(msg)  # Log warnings detected by client
+        self.c_pub = parse_key(new_s_pub)
+        self.cache(ciphertext)
+        self.nonce = msg.nonce + 1
+        return ciphertext
+
+    def process_ciphertext_with_old_keys(self, ciphertext):
+        client_mes_dict = Message.deserialize_payload(ciphertext)
+        new_s_pub = Message.get_new_pub_key(client_mes_dict)
+        secret = generate_shared_secret(self.prev_s_priv, parse_key(new_s_pub))
+        msg = Message.verify_and_parse(client_mes_dict, secret, self.nonce)
+        self.log_warnings(msg)  # Log warnings detected by client
+        self.cache(ciphertext)
+        self.nonce = msg.nonce + 1
+        self.s_priv = self.prev_s_priv  # set private key to the previous one
+
+    def replay_or_forge(self, ciphertext, e):
+        """Identifies if the ciphertext is a replay or a forge, and returns correct ack"""
+        if is_integrity_error(e):  # Not a resend from the client, maybe a Mallory replay?
+            if self.is_replay(ciphertext):
+                self.log_general_warning()
+                return ACK_FOR_REPLAY_OR_DROP
+            # truly a forged message
+            self.log_integrity_warning()
+            return ACK_FOR_FORGED
+        if is_general_error(e):
+            self.log_general_warning()
+            return ACK_FOR_REPLAY_OR_DROP
+        raise e
+
+    def cache(self, ciphertext):
+        msg_hash = SHA256.new(ciphertext.encode("utf-8")).digest()
+        self.message_cache.add(msg_hash)
+
+    def needs_key_exchange(self):
+        """Used to check if this is the first message, guaranteed to be untampered with"""
+        return self.c_pub is None
 
     def output(self, message: str) -> None:
         """You should not need to modify this function.
@@ -170,8 +138,3 @@ class VPN_SERVER:
             self.log_general_warning()
         if msg.is_integrity_warning():
             self.log_integrity_warning()
-
-    # TODO delete this:
-    def debug(self, message: str) -> None:
-        self.debug_file.write(message)
-        self.debug_file.flush()

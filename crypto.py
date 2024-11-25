@@ -1,3 +1,4 @@
+from json import JSONDecodeError
 from Crypto.PublicKey import ECC
 from Crypto.Hash import SHAKE128, SHA256, HMAC
 from Crypto.Protocol.DH import key_agreement
@@ -5,6 +6,14 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from base64 import b64encode, b64decode
 import json
+
+
+def is_integrity_error(e: Exception) -> bool:
+    return isinstance(e, IntegrityError) or isinstance(e, JSONDecodeError)
+
+
+def is_general_error(e: Exception) -> bool:
+    return isinstance(e, InvalidNonceError) or isinstance(e, DroppedMessageError)
 
 
 class IntegrityError(Exception):
