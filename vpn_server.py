@@ -21,10 +21,6 @@ class VPN_SERVER:
         self.logged_general_warning = False
         self.prev_s_priv = None  # In case the client resends, and we need to verify with old keys
 
-    def is_replay(self, ciphertext):
-        msg_hash = SHA256.new(ciphertext.encode("utf-8")).digest()
-        return msg_hash not in self.message_cache
-
     def receive(self, ciphertext: str) -> str:
         """processes the ciphertext and returns an ack string ready to be sent to the client"""
         if self.needs_key_exchange():
@@ -107,6 +103,10 @@ class VPN_SERVER:
     def cache(self, ciphertext):
         msg_hash = SHA256.new(ciphertext.encode("utf-8")).digest()
         self.message_cache.add(msg_hash)
+
+    def is_replay(self, ciphertext):
+        msg_hash = SHA256.new(ciphertext.encode("utf-8")).digest()
+        return msg_hash in self.message_cache
 
     def needs_key_exchange(self):
         """Used to check if this is the first message, guaranteed to be untampered with"""
