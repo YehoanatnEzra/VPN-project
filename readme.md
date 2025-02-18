@@ -20,7 +20,6 @@ For this Project, I instantiated Mallory as a man in the middle by establishing 
 This allows Mallory to easily see the information exchanged between client and server, *delete* packets, and *replay* packets.
 Mallory will also have access to the public key information of the client and the server.
 
-(https://classroom.github.com/a/u6uaLgrh)
 # There is a man in the middle!!
 This project was developed as part of the final assignment in the Cybersecurity course at the University of British Columbia (UBC).
 I designed and implemented a simple VPN that enables secure communication between two computers over a protected channel.
