@@ -42,4 +42,4 @@ Additionally the server sends acknowledgements to detect message drops. We issue
 ### How to set up the code
 The required packages can be found in the requirements.txt file.
 To run the project, the port in the server, on which the server is listening and the port in the client on which the server is listening must be configured to the same port. After that you can run python3 server_wrapper.py, and python3 client_wrapper.py in two different terminals.
-The legitimate messages and the security warnings will be logged in server_output.txt
+The legitimate messages and the security warnings will be logged in server_output.txt.
