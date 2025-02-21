@@ -1,6 +1,6 @@
 # There is a man in the middle!!
 This project was developed as part of the final assignment in the Cybersecurity course at the University of British Columbia (UBC).
-I designed and implemented a simple VPN that enables secure communication between two computers over a protected channel.
+I designed and implemented a simple VPN that enables secure communication between two computer and server over a protected channel.
 Both the client and server start with public key information about the other party, ensuring secure key exchange.
 The VPN provides confidentiality, integrity, and mutual authentication, protecting data against unauthorized access and tampering.
 
@@ -50,11 +50,9 @@ new public key is included in every message and signed using the HMAC, ensuring 
 transit, such changes will be detected by the receiving party during HMAX verification. Since the public key is
 signed, it is safe to allow modification during transit, and these modifications don't compromise security. With every
 message exchange we derive a new 𝐾 and key pair the same way as in the key agreement protocol.
-𝑒𝑛𝑐
-𝐾𝑎𝑢𝑡ℎ
+
 This protocol provides confidentiality because the adversary can’t get access to the keys and our encryption
-function is strong. The HMAC provides integrity and authentication because the adversary does not have 𝐾 .
-𝑎𝑢𝑡ℎ
+function is strong. The HMAC provides integrity and authentication because the adversary does not have 𝐾.𝑎𝑢𝑡ℎ
 𝐾 is used for integrity by generating an HMAC from Q and comparing it to the HMAC provided in the payload to
 𝑎𝑢𝑡ℎ
 ensure the message hasn't been tampered with, and it ensures authentication by using it to verify that the
